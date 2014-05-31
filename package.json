@@ -1,0 +1,42 @@
+{
+  "name": "modely",
+  "version": "0.0.1",
+  "description": "Fast and flexible data models for node.js and the browser.",
+  "main": "modely.js",
+  "scripts": {
+    "all": "npm test; npm run coverage; npm run minify",
+    "prepublish": "npm run all",
+    "pretest": "./node_modules/.bin/jshint ./modely.js",
+    "test": "./node_modules/mocha/bin/mocha",
+    "watch": "./node_modules/mocha/bin/mocha  --watch",
+    "coverage": "./node_modules/istanbul/lib/cli.js cover ./node_modules/mocha/bin/_mocha",
+    "minify": "./node_modules/.bin/uglifyjs -o ./modely.min.js ./modely.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/codemix/modely"
+  },
+  "keywords": [
+    "model",
+    "models",
+    "data models",
+    "mvc"
+  ],
+  "author": "Charles Pick <charles@codemix.com>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/codemix/modely/issues"
+  },
+  "homepage": "https://github.com/codemix/modely",
+  "devDependencies": {
+    "expect.js": "~0.3.1",
+    "should": "~3.3.1",
+    "mocha": "~1.18.2",
+    "istanbul": "~0.2.10",
+    "jshint": "~2.5.1",
+    "uglify-js": "~2.4.13"
+  },
+  "dependencies": {
+    "classer": "0.0.4"
+  }
+}
