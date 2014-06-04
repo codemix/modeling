@@ -8,7 +8,6 @@
   ],
   "description": "Fast and flexible data models for node.js and the browser.",
   "moduleType": [
-    "globals",
     "node"
   ],
   "keywords": [
@@ -24,5 +23,10 @@
     "bower_components",
     "test",
     "tests"
-  ]
+  ],
+  "dependencies": {
+    "classing": "~0.0.8",
+    "validating": "~0.0.2",
+    "casting": "~0.0.1"
+  }
 }

@@ -1,20 +1,22 @@
 {
-  "name": "modely",
+  "name": "modeling",
   "version": "0.0.1",
   "description": "Fast and flexible data models for node.js and the browser.",
-  "main": "modely.js",
+  "main": "lib/index.js",
   "scripts": {
     "all": "npm test; npm run coverage; npm run minify",
-    "prepublish": "npm run all",
-    "pretest": "./node_modules/.bin/jshint ./modely.js",
+    "prepublish": "npm test && npm run minify",
+    "pretest": "npm run jshint",
+    "jshint": "./node_modules/.bin/jshint ./lib",
     "test": "./node_modules/mocha/bin/mocha",
     "watch": "./node_modules/mocha/bin/mocha  --watch",
     "coverage": "./node_modules/istanbul/lib/cli.js cover ./node_modules/mocha/bin/_mocha",
-    "minify": "./node_modules/.bin/uglifyjs -o ./modely.min.js ./modely.js"
+    "browserify": "./node_modules/.bin/browserify -s Modeling -o ./dist/modeling.js ./lib/index.js",
+    "minify": "npm run browserify; ./node_modules/.bin/uglifyjs -o ./dist/modeling.min.js ./dist/modeling.js"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/codemix/modely"
+    "url": "https://github.com/codemix/modeling"
   },
   "keywords": [
     "model",
@@ -25,18 +27,21 @@
   "author": "Charles Pick <charles@codemix.com>",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/codemix/modely/issues"
+    "url": "https://github.com/codemix/modeling/issues"
   },
-  "homepage": "https://github.com/codemix/modely",
+  "homepage": "https://github.com/codemix/modeling",
   "devDependencies": {
     "expect.js": "~0.3.1",
-    "should": "~3.3.1",
+    "should": "~3.3.2",
     "mocha": "~1.18.2",
     "istanbul": "~0.2.10",
     "jshint": "~2.5.1",
-    "uglify-js": "~2.4.13"
+    "uglify-js": "~2.4.13",
+    "browserify": "~4.1.8"
   },
   "dependencies": {
-    "classer": "0.0.4"
+    "casting": "0.0.1",
+    "classing": "0.0.8",
+    "validating": "0.0.4"
   }
 }
