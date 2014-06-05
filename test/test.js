@@ -2,7 +2,7 @@ var Modeling = require('../lib');
 
 describe('Modeling', function () {
 
-  var Thing = Modeling({
+  var Thing = Modeling('Thing', {
     '@id': {
       label: 'ID',
       description: 'The unique ID of the thing.',
@@ -15,7 +15,7 @@ describe('Modeling', function () {
     }
   });
 
-  var User = Modeling({
+  var User = Modeling('User', {
     name: {
       label: 'Name',
       description: 'The name of the user.',
@@ -73,6 +73,28 @@ describe('Modeling', function () {
     });
   });
 
+  describe('toJSON()', function () {
+    it('should return a JSONable version of the class', function () {
+      var obj = JSON.parse(JSON.stringify(User));
+      obj.should.have.properties(['name', 'properties']);
+      obj.properties.should.have.properties(['@id', 'email', 'name', 'noType']);
+    });
+
+    it('should return a JSONable version of a class **instance**', function () {
+      var user = new User({
+        '@id': 0,
+        name: 'admin',
+        email: 'admin@example.com'
+      });
+      var obj = JSON.parse(JSON.stringify(user));
+      obj.should.have.properties({
+        '@id': 0,
+        name: 'admin',
+        email: 'admin@example.com'
+      });
+    });
+  });
+
   describe('integration', function () {
     beforeEach(function () {
       this.user = new User({
@@ -86,7 +108,15 @@ describe('Modeling', function () {
     });
 
     it('should have only the defined keys', function () {
-      Object.keys(this.user).should.eql(['@id', 'noType', 'name', 'email']);
+      this.user.keys().should.eql(['@id', 'email', 'name', 'noType']);
+    });
+
+    it('should iterate all the keys', function () {
+      var obj = {};
+      this.user.forEach(function (value, key) {
+        obj[key] = value;
+      });
+      obj.should.eql(this.user.toJSON());
     });
 
     it('should validate invalid objects', function () {
