@@ -50,6 +50,9 @@ var Person = Thing.extend("Person", {
     type: Number,
     get: function () {
       var birthday = this.dateOfBirth;
+      if (!birthday) {
+        return false;
+      }
       var ageDifMs = Date.now() - birthday.getTime();
       var ageDate = new Date(ageDifMs); // miliseconds from epoch
       return Math.abs(ageDate.getFullYear() - 1970);
