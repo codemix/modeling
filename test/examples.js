@@ -71,4 +71,40 @@ describe('Examples', function () {
     expect(function () {person.dateOfBirth = 'not a date';}).to.throwError(TypeError);
     Person.validate(person).valid.should.be.false;
   });
+
+  it('should reject invalid user input', function () {
+    var result = Person.input({
+      name: null,
+      dateOfBirth: 'not a date'
+    });
+
+    result.valid.should.be.false;
+    result.errors.should.have.properties(['name', 'dateOfBirth']);
+  });
+
+  it('should accept user input', function () {
+    var result = Person.input({
+      name: 'nom',
+      dateOfBirth: '2013-10-01'
+    });
+
+    result.valid.should.be.true;
+    result.value.should.be.instanceOf(Person);
+    result.value.name.should.equal('nom');
+    result.value.dateOfBirth.should.eql(new Date('2013-10-01'));
+  });
+
+  it('should apply input to an existing instance', function () {
+    var person = new Person({
+      name: 'Bob',
+      url: 'http://example.com/',
+      dateOfBirth: '2000-01-01'
+    });
+    person.age.should.equal(new Date().getFullYear() - 2000);
+    var result = Person.input(person, {
+      dateOfBirth: '1990-01-01'
+    });
+    result.valid.should.be.true;
+    person.age.should.equal(new Date().getFullYear() - 1990);
+  });
 });
