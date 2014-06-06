@@ -60,6 +60,16 @@ var Person = Thing.extend("Person", {
   }
 });
 
+var person = new Person({
+  name: 'Bob',
+  url: 'http://codemix.com/',
+  dateOfBirth: '1980-01-01'
+});
+
+console.log(person.age);
+
+console.log(JSON.stringify(person, null, 2));
+
 ```
 
 # Installation
