@@ -45,7 +45,7 @@
     "laxbreak"      : false,
     "laxcomma"      : false,
     "loopfunc"      : true,
-    "multistr"      : false,
+    "multistr"      : true,
     "proto"         : false,
     "scripturl"     : false,
     "smarttabs"     : false,
