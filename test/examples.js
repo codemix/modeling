@@ -68,7 +68,9 @@ describe('Examples', function () {
     var person = new Person();
     person.name = 'Bob';
     person.configure({url: 'not a url'});
-    expect(function () {person.dateOfBirth = 'not a date';}).to.throwError(TypeError);
+    expect(function () {
+      person.dateOfBirth = 'not a date';
+    }).to.throwError(TypeError);
     Person.validate(person).valid.should.be.false;
   });
 
@@ -77,7 +79,6 @@ describe('Examples', function () {
       name: null,
       dateOfBirth: 'not a date'
     });
-
     result.valid.should.be.false;
     result.errors.should.have.properties(['name', 'dateOfBirth']);
   });
