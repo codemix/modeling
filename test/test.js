@@ -2,6 +2,8 @@ var Modeling = require('../lib');
 
 describe('Modeling', function () {
 
+  var Blank = Modeling.create('Blank');
+
   var Thing = Modeling('Thing', {
     '@id': {
       label: 'ID',
