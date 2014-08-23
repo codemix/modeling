@@ -1,6 +1,6 @@
 {
   "name": "modeling",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Fast and flexible data models for node.js and the browser.",
   "main": "lib/index.js",
   "scripts": {
@@ -41,7 +41,7 @@
   },
   "dependencies": {
     "casting": "0.0.1",
-    "classing": "0.0.9",
-    "validating": "0.0.5"
+    "classing": "0.1.0",
+    "validating": "0.0.6"
   }
 }

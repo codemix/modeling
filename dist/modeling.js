@@ -1,412 +1,385 @@
 !function(e){if("object"==typeof exports&&"undefined"!=typeof module)module.exports=e();else if("function"==typeof define&&define.amd)define([],e);else{var f;"undefined"!=typeof window?f=window:"undefined"!=typeof global?f=global:"undefined"!=typeof self&&(f=self),f.Modeling=e()}}(function(){var define,module,exports;return (function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);throw new Error("Cannot find module '"+o+"'")}var f=n[o]={exports:{}};t[o][0].call(f.exports,function(e){var n=t[o][1][e];return s(n?n:e)},f,f.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({1:[function(_dereq_,module,exports){
-"use strict";
+'use strict';
 
-var Classing = _dereq_('classing'),
+var ClassFactory = _dereq_('classing').Factory,
     Casting = _dereq_('casting'),
-    Validating = _dereq_('validating');
+    Validating = _dereq_('validating'),
+    each = ClassFactory.each,
+    createAccessor = ClassFactory.createAccessor;
 
-
-var Modeling = Classing.extend({
+module.exports = ClassFactory.extend({
   /**
-   * Make a constructor for a class.
+   * Create a constructor function for a class.
    *
    * @param  {String} name The name of the class.
-   * @return {Function}    The constructor function.
-   */
-  makeConstructor: function (name) {
-    var body = 'return function ' + name + ' (config) {' +
-               '  if (!(this instanceof ' + name + ')) {' +
-               '    return new ' + name + '(config);' +
-               '  }' +
-               '  Object.defineProperty(this, "__state__", {value: {}});' +
-               '  this.applyDefaults();' +
-               '  if (config) { this.configure(config); }' +
-               '  this.initialize();' +
-               '};';
-    return new Function(body)(); // jshint ignore:line
-  },
-
-  /**
-   * Make a prototype for a class, based on the given descriptors.
    *
-   * @param  {Function} Class       The class itself.
-   * @param  {Object} descriptors   The descriptors for the class.
+   * @return {Function} The constructor function.
    */
-  makePrototype: function (Class, descriptors) {
-    Classing.makePrototype.call(this, Class, descriptors);
-    Object.defineProperties(Class.prototype, {
-      __state__: {
-        enumerable: false,
-        writable: true
+  createConstructor: function (name) {
+    var body = 'return function ' + name + ' (config) {\n\
+                  "use strict";\n\
+                  if (!(this instanceof ' + name + ')) {\n\
+                    return new ' + name + '(config);\n\
+                  }\n\
+                  this["[[state]]"] = {};\n\
+                  this.applyDefaults();\n\
+                  if (config) { this.configure(config); }\n\
+                  this.initialize();\n\
+                };';
+    return (new Function(body))(); // jshint ignore: line
+  },
+  /**
+   * Create a prototype for the given Class + descriptors.
+   *
+   * @param  {Function} Class       The class.
+   * @param  {Object}   descriptors The property descriptors.
+   *
+   * @return {Object} The descriptors for the default prototype.
+   */
+  createDefaultPrototype: function (Class, descriptors) {
+    var proto = ClassFactory.prototype.createDefaultPrototype.call(this, Class, descriptors);
+    proto['[[state]]'] = {
+      enumerable: false,
+      configurable: false,
+      writable: true
+    };
+    proto.forEach = {
+      enumerable: false,
+      configurable: false,
+      writable: true,
+      value: this.createForEach(Class, descriptors)
+    };
+    proto.keys = {
+      enumerable: false,
+      configurable: false,
+      writable: true,
+      value: this.createKeys(Class, descriptors)
+    };
+    return proto;
+  },
+  /**
+   * Create a `forEach` function for a class.
+   *
+   * @param  {Function} Class       The class.
+   * @param  {Object}   descriptors The property descriptors.
+   *
+   * @return {Function} The forEach function.
+   */
+  createForEach: function (Class, descriptors) {
+    var body = '"use strict";\nthisContext = thisContext || this;\n';
+    each(descriptors, function (descriptor, name) {
+      var accessor = createAccessor(name);
+      body += 'if (this'+accessor+' !== undefined) {\n\
+                 fn.call(thisContext, this'+accessor+', '+JSON.stringify(name)+', this);\n\
+               }';
+    });
+    return this.createDynamicFunction('fn', 'thisContext', body);
+  },
+  /**
+   * Create a `keys` function for a class.
+   *
+   * @param  {Function} Class       The class.
+   * @param  {Object}   descriptors The property descriptors.
+   *
+   * @return {Function} The keys function.
+   */
+  createKeys: function (Class, descriptors) {
+    var keys = [];
+    each(descriptors, function (descriptor, name) {
+      if (descriptor.enumerable) {
+        keys.push(name);
       }
     });
+    keys.sort();
+    var body = '"use strict";\nreturn ' + JSON.stringify(keys) + ';';
+    return this.createDynamicFunction(body);
   },
 
-
   /**
-   * Make the static methods for a class.
+   * Normalize a descriptor.
    *
-   * @param  {Function} Class        The class itself.
-   * @param  {Object}   descriptors  The property descriptors for the class.
+   * @param  {String} name        The name of the descriptor.
+   * @param  {mixed}  descriptor  The raw descriptor or value.
+   *
+   * @return {Object} The normalized descriptor.
    */
-  makeStatic: {
-    value: function (Class, descriptors) {
-      var Modeling = this; // to allow subclassing
-      Classing.makeStatic.call(this, Class, descriptors);
-      var defineProperty = Class.defineProperty;
-      Object.defineProperties(Class, {
-        /**
-         * Define a new property on the class.
-         */
-        defineProperty: {
-          configurable: true,
-          value: function (name, descriptor, skipReload) {
-            var cast;
-            if (name !== '__state__' &&
-                descriptor &&
-                descriptor.type &&
-               !descriptor.hasOwnProperty('get') &&
-               !descriptor.hasOwnProperty('set') &&
-               !descriptor.hasOwnProperty('value')
-            ) {
-              cast = Casting.get(descriptor.type);
-              descriptor.enumerable = true;
-              descriptor.configurable = true;
-              descriptor.get = function () {
-                return this.__state__[name];
-              };
-              descriptor.set = function (value) {
-                this.__state__[name] = cast(value);
-              };
-            }
-            return defineProperty.call(this, name, descriptor, skipReload);
-          }
-        },
-        /**
-         * Update any autogenerated functions.
-         */
-        updateAutoGeneratedFunctions: {
-          configurable: true,
-          value: function () {
+  normalizeDescriptor: function (name, descriptor) {
+    var normalized = ClassFactory.prototype.normalizeDescriptor.call(this, name, descriptor);
+    if (typeof normalized.value !== 'function' &&
+        typeof normalized.get !== 'function' &&
+        typeof normalized.set !== 'function' &&
+        normalized.writable !== false
+    ) {
+      return this.wrapDescriptor(name, normalized);
+    }
+    else {
+      return normalized;
+    }
+  },
+  /**
+   * Wrap a descriptor in getters / setters.
+   *
+   * @param  {String} name        The name of the descriptor.
+   * @param  {Object} descriptor  The normalized descriptor.
+   *
+   * @return {Object} The wrapped descriptor.
+   */
+  wrapDescriptor: function (name, descriptor) {
+    var value = descriptor.value,
+        wrapped = {};
+    each(descriptor, function (value, key) {
+      if (key !== 'value' && key !== 'writable') {
+        wrapped[key] = value;
+      }
+    });
+    wrapped.get = function () {
+      return this['[[state]]'][name];
+    };
+    if (wrapped.cast || wrapped.type) {
+      var caster = wrapped.cast || Casting.get(wrapped.type);
+      wrapped.set = function (value) {
+        this['[[state]]'][name] = value === null ? null : caster.call(this, value);
+      };
+    }
+    else {
+      wrapped.set = function (value) {
+        this['[[state]]'][name] = value;
+      };
+    }
+    return wrapped;
+  },
+  /**
+   * Create the default static methods / properties for a class.
+   *
+   * @param  {Function} Class             The class.
+   * @param  {Object}   descriptors       The property descriptors.
+   * @param  {Object}   staticDescriptors The static property descriptors.
+   *
+   * @return {Object} The default static descriptors.
+   */
+  createDefaultStatic: function (Class, descriptors, staticDescriptors) {
+    var context = ClassFactory.prototype.createDefaultStatic.call(this, Class, descriptors, staticDescriptors);
+    context.cast = {
+      enumerable: true,
+      configurable: true,
+      writable: true,
+      value: this.createStaticCast(Class, descriptors, staticDescriptors)
+    };
+    context.validate = {
+      enumerable: true,
+      configurable: true,
+      writable: true,
+      value: this.createStaticValidate(Class, descriptors, staticDescriptors)
+    };
+    context.input = {
+      enumerable: true,
+      configurable: true,
+      writable: true,
+      value: this.createStaticInput(Class, descriptors, staticDescriptors)
+    };
+    context.toJSON = {
+      enumerable: true,
+      configurable: true,
+      writable: true,
+      value: this.createStaticToJSON(Class, descriptors, staticDescriptors)
+    };
+    return context;
+  },
+  /**
+   * Create a function which can cast objects to this class.
+   *
+   * @param  {Function} Class             The class.
+   * @param  {Object}   descriptors       The property descriptors.
+   * @param  {Object}   staticDescriptors The static property descriptors.
+   *
+   * @return {Function} The generated function.
+   */
+  createStaticCast: function (Class, descriptors, staticDescriptors) {
+    var castAll = Casting.forDescriptors(descriptors);
+    function cast (value) {
+      if (!(value instanceof this)) {
+       return new this(value);
+      }
+      else {
+        return castAll(value);
+      }
+    }
 
-            if (!this.prototype.applyDefaults || this.prototype.applyDefaults.isAutoGenerated) {
-              this.prototype.applyDefaults = this.makeApplyDefaults(descriptors);
-            }
-            if (!this.prototype.configure || this.prototype.configure.isAutoGenerated) {
-              this.prototype.configure = this.makeConfigure(descriptors);
-            }
-            if (!this.prototype.toJSON || this.prototype.toJSON.isAutoGenerated) {
-              this.prototype.toJSON = this.makeToJSON(descriptors);
-            }
-            if (!this.prototype.forEach || this.prototype.forEach.isAutoGenerated) {
-              this.prototype.forEach = this.makeForEach(descriptors);
+    cast.isAutoGenerated = true;
+    return cast;
+  },
+  /**
+   * Create a function which validate instances of the class.
+   *
+   * @param  {Function} Class             The class.
+   * @param  {Object}   descriptors       The property descriptors.
+   * @param  {Object}   staticDescriptors The static property descriptors.
+   *
+   * @return {Function} The generated function.
+   */
+  createStaticValidate: function (Class, descriptors, staticDescriptors) {
+    var validate = Validating.forDescriptors(descriptors);
+    validate.isAutoGenerated = true;
+    return validate;
+  },
+  /**
+   * Create a function which can accept user input for the model.
+   *
+   * @param  {Function} Class             The class.
+   * @param  {Object}   descriptors       The property descriptors.
+   * @param  {Object}   staticDescriptors The static property descriptors.
+   *
+   * @return {Function} The generated function.
+   */
+  createStaticInput: function (Class, descriptors, staticDescriptors) {
+    var casters = {},
+        validators = {},
+        body = '"use strict";\n\
+                var valid = true,\n\
+                    errors = {},\n\
+                    result;\n\
+                if (values === undefined) {\n\
+                  values = subject || {};\n\
+                  subject = new this();\n\
+                }\n';
 
+    each(descriptors, function (descriptor, key) {
+      if (key === '[[state]]' ||
+          key === 'initialize' ||
+          (!descriptor.writable && typeof descriptor.set !== 'function') ||
+          typeof descriptor.value === 'function'
+      ) {
+        return;
+      }
+
+      var accessor = createAccessor(key);
+      body += 'if (values'+accessor+' !== undefined) {\n';
+      if (descriptor.type) {
+        casters[key] = Casting.get(descriptor.type);
+        body += 'if (values'+accessor+' === null) {\n\
+                   subject'+accessor+' = null;\n\
+                 }\n\
+                 else {\n\
+                  result = tryCatch(casters'+accessor+', values'+accessor+');\n\
+                  if (result.error) {\n\
+                    valid = false;\n\
+                    errors'+accessor+' = result.error.message;\n\
+                  }\n\
+                  else {\n\
+                    subject'+accessor+' = result.value;\n\
+                  }\n\
+                }\n';
+      }
+      else {
+        body += 'subject'+accessor+' = values'+accessor+';\n';
+      }
+      body += '}\n';
+      if (descriptor.rules) {
+        validators[key] = Validating.forDescriptor(key, descriptor);
+        body += 'if (!errors'+accessor+') {\n\
+                  result = validators'+accessor+'(subject'+accessor+');\n\
+                  if (!result.valid) {\n\
+                    valid = false;\n\
+                    errors'+accessor+' = result.error;\n\
+                  }\n\
+                }\n';
+      }
+    });
+
+    body += 'return {\n\
+              valid: valid,\n\
+              value: subject,\n\
+              errors: errors\n\
+            };';
+
+    var input = this.createDynamicFunction('validators', 'casters', 'tryCatch', 'subject', 'values', body);
+
+    var fn = function (subject, values) {
+      return input.call(this, validators, casters, tryCatch1, subject, values);
+    };
+    fn.isAutoGenerated = true;
+    return fn;
+  },
+  /**
+   * Create a function which can return a representation
+   * of the **class**, whichcan be encoded as JSON.
+   *
+   * @param  {Function} Class             The class.
+   * @param  {Object}   descriptors       The property descriptors.
+   * @param  {Object}   staticDescriptors The static property descriptors.
+   *
+   * @return {Function} The generated function.
+   */
+  createStaticToJSON: function (Class, descriptors, staticDescriptors) {
+    var properties = {};
+    each(descriptors, function (descriptor, name) {
+      var property = {};
+      properties[name] = property;
+      each(descriptor, function (value, key) {
+        if (key === 'rules') {
+          property.rules = value.map(function (item) {
+            var name;
+            if (Array.isArray(item)) {
+              name = item[0];
+              item = item[1] || {};
+              item.name = name;
+              return item;
             }
-            if (!this.prototype.keys || this.prototype.keys.isAutoGenerated) {
-              this.prototype.keys = this.makeKeys(descriptors);
+            else {
+              return item;
             }
-            if (!this.cast || this.cast.isAutoGenerated) {
-              this.cast = this.makeCast(descriptors);
-            }
-            if (!this.input || this.input.isAutoGenerated) {
-              this.input = this.makeInput(descriptors);
-            }
-            if (!this.validate || this.validate.isAutoGenerated) {
-              this.validate = this.makeValidate(descriptors);
-            }
-            if (!this.toJSON || this.toJSON.isAutoGenerated) {
-              this.toJSON = this.makeStaticToJSON(descriptors);
-            }
-          }
-        },
-        /**
-         * Make a function which can cast property values to the correct type.
-         * @type {Function}
-         */
-        makeCast: {
-          configurable: true,
-          value: function (descriptors) {
-            var castAll = Casting.forDescriptors(descriptors),
-                fn = function (value) {
-                  if (!(value instanceof this)) {
-                   return new this(value);
-                  }
-                  else {
-                    return castAll(value);
-                  }
-                };
-
-            fn.isAutoGenerated = true;
-            return fn;
-          }
-        },
-        /**
-         * Make a function which can validate instances of the class.
-         * @type {Function}
-         */
-        makeValidate: {
-          configurable: true,
-          value: function (descriptors) {
-            var validate = Validating.forDescriptors(descriptors);
-            validate.isAutoGenerated = true;
-            return validate;
-          }
-        },
-        /**
-         * Make a function which can accept user input for the model.
-         * @type {Function}
-         */
-        makeInput: {
-          configurable: true,
-          value: function (descriptors) {
-            var keys = Object.keys(descriptors),
-                total = keys.length,
-                casters = {},
-                validators = {},
-                body = '"use strict";\n',
-                accessor, key, descriptor, i;
-
-            body += 'var valid = true, errors = {}, result;\n' +
-                    'if (values === undefined) { values = subject || {}; subject = new this(); }\n';
-            for (i = 0; i < total; i++) {
-              key = keys[i];
-              descriptor = descriptors[key];
-
-              if (key === '__state__' ||
-                  key === 'initialize' ||
-                  (!descriptor.writable && !descriptor.hasOwnProperty('set'))
-              ) {
-                continue;
-              }
-
-              if (/^([\w|_|$]+)$/.test(key)) {
-                accessor = '.' + key;
-              }
-              else {
-                accessor = '["' + key + '"]';
-              }
-
-              body += 'if (values' + accessor + ' !== undefined) {\n';
-              if (descriptor.type) {
-                casters[key] = Casting.get(descriptor.type);
-                body += '  if (values' + accessor + ' === null) {\n';
-                body += '     values' + accessor + ' = null;\n';
-                body += '  }\n';
-                body += '  else {\n';
-                body += '    result = tryCatch1(casters' + accessor + ', values' + accessor +');\n';
-                body += '    if (result.error) {\n';
-                body += '       valid = false;\n';
-                body += '       errors' + accessor + ' = result.error.message;\n';
-                body += '    }\n';
-                body += '    else {\n';
-                body += '      subject' + accessor + ' = result.value;\n';
-                body += '    }\n';
-                body += '  }\n';
-              }
-              else {
-                body += '  subject' + accessor + ' = values' + accessor + ';\n';
-              }
-              body += '}\n';
-              if (descriptor.rules) {
-                validators[key] = Validating.forDescriptor(key, descriptor);
-                body += 'if (!errors' + accessor + ') {\n';
-                body += '  result = validators' + accessor + '(subject' + accessor + ');\n';
-                body += '  if (!result.valid) {\n';
-                body += '    valid = false;\n';
-                body += '    errors' + accessor + ' = result.error;\n';
-                body += '  }\n';
-                body += '}\n';
-              }
-            }
-
-            body += 'return {valid: valid, value: subject, errors: errors};';
-
-            var fn = new Function('validators', 'casters', 'tryCatch1', 'subject', 'values', body); // jshint ignore: line
-            fn = fn.bind(this, validators, casters, tryCatch1);
-            fn.isAutoGenerated = true;
-            return fn;
-          }
-        },
-        /**
-         * Make an efficient `configure()` function to set property values
-         * for an object based on the given descriptors.
-         *
-         * @param  {Object} descriptors The descriptors for the object.
-         * @return {Function}           The `configure()` function.
-         */
-        makeConfigure: {
-          configurable: true,
-          value: function (descriptors) {
-            var keys = Object.keys(descriptors),
-                total = keys.length,
-                casters = {},
-                body = '',
-                accessor, key, descriptor, i;
-
-            for (i = 0; i < total; i++) {
-              key = keys[i];
-              if (key === '__state__') {
-                continue;
-              }
-              descriptor = descriptors[key];
-              if (descriptor.writable || descriptor.hasOwnProperty('set')) {
-                if (/^([\w|_|$]+)$/.test(key)) {
-                  accessor = '.' + key;
-                }
-                else {
-                  accessor = '["' + key + '"]';
-                }
-                body += 'if (config' + accessor + ' !== undefined) {\n';
-                body += '  this' + accessor + ' = config' + accessor + ';\n';
-                body += '}';
-              }
-            }
-
-            var fn = new Function('casters', 'config', body); // jshint ignore:line
-            var configure = function (config) {
-              return fn.call(this, casters, config);
-            };
-            configure.isAutoGenerated = true;
-            return configure;
-          }
-        },
-        /**
-         * Make an efficient `forEach()` function for the given descriptors.
-         * @type {Function}
-         */
-        makeForEach: {
-          configurable: true,
-          value: function (descriptors) {
-            var keys = Object.keys(descriptors),
-                total = keys.length,
-                body = 'thisContext = thisContext || this;\n',
-                accessor, key, descriptor, i;
-
-            for (i = 0; i < total; i++) {
-              key = keys[i];
-              descriptor = descriptors[key];
-              if (!descriptor.enumerable) {
-                continue;
-              }
-              if (/^([\w|_|$]+)$/.test(key)) {
-                accessor = '.' + key;
-              }
-              else {
-                accessor = '["' + key + '"]';
-              }
-              body += 'if (this' + accessor + ' !== undefined) { fn.call(thisContext, this' + accessor + ', "' + key + '", this); }\n'; // jshint ignore:line
-            }
-            var forEach = new Function('fn', 'thisContext', body); // jshint ignore: line
-            forEach.isAutoGenerated = true;
-            return forEach;
-          }
-        },
-        /**
-         * Make an efficient `keys()` function for the given descriptors.
-         * @type {Function}
-         */
-        makeKeys: {
-          configurable: true,
-          value: function (descriptors) {
-            var names = Object.keys(descriptors).sort(),
-                total = names.length,
-                items = [],
-                name, descriptor, i;
-
-            for (i = 0; i < total; i++) {
-              name = names[i];
-              descriptor = descriptors[name];
-              if (descriptor.enumerable) {
-                items.push(name);
-              }
-            }
-            var keys = function () { return items; };
-            keys.isAutoGenerated = true;
-            return keys;
-          }
-        },
-        /**
-         * Make a function which can return a representation of the **class**, which
-         * can be encoded as JSON.
-         *
-         * @type {Function}
-         */
-        makeStaticToJSON: {
-          configurable: true,
-          value: function (descriptors) {
-            var names = Object.keys(descriptors).sort(),
-                totalNames = names.length,
-                properties = {},
-                property, name, descriptor, i,
-                keys, totalKeys, key, j;
-
-            for (i = 0; i < totalNames; i++) {
-              name = names[i];
-              descriptor = descriptors[name];
-              if (descriptor.enumerable) {
-                keys = Object.keys(descriptor);
-                totalKeys = keys.length;
-                property = {};
-                properties[name] = property;
-                for (j = 0; j < totalKeys; j++) {
-                  key = keys[j];
-                  switch (key) {
-                    case 'enumerable':
-                    case 'configurable':
-                    case 'writable':
-                    case 'get':
-                    case 'set':
-                    case 'value':
-                      break;
-                    case 'default':
-                      if (typeof descriptor.default !== 'function') {
-                        property.default = descriptor.default;
-                      }
-                      break;
-                    case 'rules':
-                      property.rules = descriptor.rules.map(function (item) {
-                        var name;
-                        if (Array.isArray(item)) {
-                          name = item[0];
-                          item = item[1] || {};
-                          item.name = name;
-                          return item;
-                        }
-                        else {
-                          return item;
-                        }
-                      });
-                      break;
-                    default:
-                      property[key] = descriptor[key];
-                  }
-                }
-              }
-            }
-            var toJSON = function () {
-              return {
-                '@context': this['@context'],
-                '@id': this['@id'],
-                '@type': this['@type'] || this.name,
-                name: this.name,
-                properties: properties
-              };
-            };
-
-            toJSON.isAutoGenerated = true;
-            return toJSON;
-          }
+          });
+        }
+        else if (!isBuiltinDescriptorKey(key)) {
+          property[key] = value;
         }
       });
+    });
+    var toJSON = function () {
+      return {
+        '@context': this['@context'],
+        '@id': this['@id'],
+        '@type': this['@type'],
+        name: this.name,
+        properties: properties
+      };
+    };
+
+    toJSON.isAutoGenerated = true;
+    return toJSON;
+  },
+  /**
+   * Update the dynamic auto-generated functions for a class.
+   *
+   * @param  {Function} Class             The class.
+   * @param  {Object}   descriptors       The property descriptors.
+   * @param  {Object}   staticDescriptors The static property descriptors.
+   */
+  updateDynamicFunctions: function (Class, descriptors) {
+    ClassFactory.prototype.updateDynamicFunctions.call(this, Class, descriptors);
+    if (!Class.prototype.forEach || Class.prototype.forEach.isAutoGenerated) {
+      Class.prototype.forEach = this.createForEach(Class, descriptors);
+    }
+    if (!Class.prototype.keys || Class.prototype.keys.isAutoGenerated) {
+      Class.prototype.keys = this.createKeys(Class, descriptors);
+    }
+    if (!Class.cast || Class.cast.isAutoGenerated) {
+      Class.cast = this.createStaticCast(Class, descriptors);
+    }
+    if (!Class.validate || Class.validate.isAutoGenerated) {
+      Class.validate = this.createStaticValidate(Class, descriptors);
+    }
+    if (!Class.input || Class.input.isAutoGenerated) {
+      Class.input = this.createStaticInput(Class, descriptors);
+    }
+    if (!Class.toJSON || Class.toJSON.isAutoGenerated) {
+      Class.toJSON = this.createStaticToJSON(Class, descriptors);
     }
   }
 });
 
-module.exports = Modeling;
-
-
-// try..catch causes deoptimisation in v8.
-// using a specialist function minimises the impact.
+// try..catch causes deoptimisation in V8 and most
+// other JS engines. Using a specialist function minimises the impact.
 
 function tryCatch1 (fn, arg1) {
   var errorObject = {};
@@ -418,7 +391,42 @@ function tryCatch1 (fn, arg1) {
   }
   return errorObject;
 }
-},{"casting":2,"classing":3,"validating":4}],2:[function(_dereq_,module,exports){
+
+function isBuiltinDescriptorKey (key) {
+  switch (key) {
+    case 'enumerable':
+    case 'configurable':
+    case 'writable':
+    case 'get':
+    case 'set':
+    case 'value':
+      return true;
+    default:
+      return false;
+  }
+}
+},{"casting":3,"classing":5,"validating":6}],2:[function(_dereq_,module,exports){
+'use strict';
+
+var Factory = _dereq_('./factory');
+
+var factory = new Factory();
+
+module.exports = exports = function (name, descriptors, staticDescriptors) {
+  return factory.create(name, descriptors, staticDescriptors);
+};
+
+exports.create = function (name, descriptors, staticDescriptors) {
+  return factory.create(name, descriptors, staticDescriptors);
+};
+
+exports.extend = function (methods) {
+  return Factory.extend(methods);
+};
+
+exports.Factory = Factory;
+
+},{"./factory":1}],3:[function(_dereq_,module,exports){
 "use strict";
 
 /**
@@ -567,445 +575,627 @@ exports.define('date', Date, function (value) {
   }
   return value;
 });
-},{}],3:[function(_dereq_,module,exports){
-"use strict";
+},{}],4:[function(_dereq_,module,exports){
+'use strict';
 
+function ClassFactory () {}
 
-/**
- * Main entry point
- */
+module.exports = ClassFactory;
 
-function Classing (name, descriptors) {
-  return Classing.create(name, descriptors);
-}
-
-module.exports = exports = Classing;
+var prototype = ClassFactory.prototype;
 
 /**
- * Make a class with the given property descriptors.
+ * Extend the ClassFactory class.
  *
- * @param  {Object}   descriptors An object containing the property descriptors for the class.
- * @return {Function}             The created class.
+ * @param  {Object} methods     The methods for the class factory.
+ *
+ * @return {Function} The child class factory.
  */
-Classing.create = function (name, descriptors) {
-  if (name && typeof name === 'string') {
-    descriptors = descriptors || {};
+ClassFactory.extend = function (methods) {
+  var ChildFactory = function ClassFactory () {};
+
+  each(this, function (value, key) {
+    ChildFactory[key] = value;
+  });
+
+  ChildFactory.prototype = Object.create(this.prototype);
+  ChildFactory.prototype.constructor = ChildFactory;
+
+  if (methods) {
+    each(methods, function (value, key) {
+      ChildFactory.prototype[key] = value;
+    });
   }
-  else {
-    descriptors = name || {};
+  ChildFactory.__super__ = this;
+  ChildFactory.prototype.__super__ = this.prototype;
+  return ChildFactory;
+};
+
+/**
+ * Create a new class.
+ *
+ * @param  {String} name              The name of the new class.
+ * @param  {Object} descriptors       The instance property descriptors.
+ * @param  {Object} staticDescriptors The static property descriptors.
+ *
+ * @return {Function} The class function.
+ */
+prototype.create = function (name, descriptors, staticDescriptors) {
+  if (name && typeof name === 'object') {
+    staticDescriptors = descriptors;
+    descriptors = name;
     name = 'Class';
   }
-
-  var Class = this.makeConstructor(name);
-
-  this.makeStatic(Class, descriptors);
-  this.makePrototype(Class, descriptors);
-
+  else if (!name) {
+    name = 'Class';
+    descriptors = descriptors || {};
+    staticDescriptors = staticDescriptors || {};
+  }
+  descriptors = this.normalizeDescriptors(descriptors || {});
+  staticDescriptors = this.normalizeDescriptors(staticDescriptors || {});
+  var Class = this.createConstructor(name);
+  Object.defineProperties(Class, this.createStatic(Class, descriptors, staticDescriptors));
+  Class.prototype = {};
+  Object.defineProperties(Class.prototype, this.createPrototype(Class, descriptors));
+  Class.prototype.constructor = Class;
   return Class;
 };
 
+
 /**
- * Make a constructor for a class.
+ * Normalize the given descriptors
+ *
+ * @param  {Object} descriptors The raw descriptors.
+ *
+ * @return {Object} The normalized descriptors.
+ */
+prototype.normalizeDescriptors = function (descriptors) {
+  var normalized = {},
+      self = this;
+  each(descriptors, function (descriptor, name) {
+    normalized[name] = self.normalizeDescriptor(name, descriptor);
+  });
+  return normalized;
+};
+
+/**
+ * Normalize a descriptor.
+ *
+ * @param  {String} name        The name of the descriptor.
+ * @param  {mixed}  descriptor  The raw descriptor or value.
+ *
+ * @return {Object} The normalized descriptor.
+ */
+prototype.normalizeDescriptor = function (name, descriptor) {
+  var normalized = {};
+
+  if (descriptor === null || typeof descriptor !== 'object') {
+    descriptor = {
+      value: descriptor
+    };
+  }
+
+  each(descriptor, function (value, key) {
+    normalized[key] = value;
+  });
+
+  if (normalized.value === undefined &&
+      normalized.get === undefined &&
+      normalized.set === undefined
+  ) {
+    normalized.value = null;
+  }
+
+  if (normalized.enumerable === undefined &&
+      typeof normalized.value !== 'undefined' &&
+      typeof normalized.value !== 'function'
+  ) {
+    normalized.enumerable = true;
+  }
+
+  if (normalized.configurable === undefined) {
+    normalized.configurable = true;
+  }
+
+  if (normalized.writable === undefined &&
+      normalized.get === undefined &&
+      normalized.set === undefined
+  ) {
+    normalized.writable = true;
+  }
+
+  return normalized;
+};
+
+
+/**
+ * Create a constructor function for a class.
  *
  * @param  {String} name The name of the class.
- * @return {Function}    The constructor function.
+ *
+ * @return {Function} The constructor function.
  */
-Classing.makeConstructor = function (name) {
-  var body = 'return function ' + name + ' (config) {' +
-             '  if (!(this instanceof ' + name + ')) {' +
-             '    return new ' + name + '(config);' +
-             '  }' +
-             '  this.applyDefaults();' +
-             '  if (config) { this.configure(config); }' +
-             '  this.initialize();' +
-             '};';
-  return new Function(body)(); // jshint ignore:line
+prototype.createConstructor = function (name) {
+  var body = 'return function ' + name + ' (config) {\n\
+                "use strict";\n\
+                if (!(this instanceof ' + name + ')) {\n\
+                  return new ' + name + '(config);\n\
+                }\n\
+                this.applyDefaults();\n\
+                if (config) { this.configure(config); }\n\
+                this.initialize();\n\
+              };';
+  return (new Function(body))(); // jshint ignore: line
 };
 
 /**
- * Make the static methods for a class.
+ * Create the prototype for a given class + descriptors.
  *
- * @param  {Function} Class        The class itself.
- * @param  {Object}   descriptors  The property descriptors for the class.
+ * @param  {Function} Class       The class.
+ * @param  {Object}   descriptors The property descriptors.
+ *
+ * @return {Object} The descriptors for the prototype.
  */
-Classing.makeStatic = function (Class, descriptors) {
-  var Classing = this; // to allow subclassing
-  Object.defineProperties(Class, {
-    /**
-     * Create a new instance of the class.
-     */
-    create: {
-      configurable: true,
-      value: function (properties) {
-        return new Class(properties);
-      }
-    },
-    /**
-     * Get the descriptors of the class.
-     */
-    descriptors: {
-      value: descriptors
-    },
-    /**
-     * Define a new property on the class.
-     */
-    defineProperty: {
-      configurable: true,
-      value: function (name, descriptor, skipReload) {
-        descriptor = descriptor || {value: null};
-        if (typeof descriptor === 'function') {
-          // this is a method
-          descriptor = {
-            enumerable: false,
-            configurable: true,
-            writable: true,
-            value: descriptor
-          };
-        }
+prototype.createPrototype = function (Class, descriptors) {
+  var proto = this.createDefaultPrototype(Class, descriptors);
+  each(descriptors, function (descriptor, name) {
+    proto[name] = descriptor;
+  });
+  return proto;
+};
 
-        if (descriptor.value === undefined && !(descriptor.get || descriptor.set)) {
-          descriptor.value = null;
-        }
-
-        if (descriptor.writable == null && descriptor.value !== undefined) {
-          descriptor.writable = true;
-        }
-        if (descriptor.enumerable == null) {
-          descriptor.enumerable = true;
-        }
-        if (descriptor.configurable == null) {
-          descriptor.configurable = true;
-        }
-        descriptors[name] = descriptor;
-        Object.defineProperty(this.prototype, name, descriptor);
-        if (!skipReload) {
-          this.updateAutoGeneratedFunctions();
-        }
-        return this;
-      }
+/**
+ * Create a prototype for the given Class + descriptors.
+ *
+ * @param  {Function} Class       The class.
+ * @param  {Object}   descriptors The property descriptors.
+ *
+ * @return {Object} The descriptors for the default prototype.
+ */
+prototype.createDefaultPrototype = function (Class, descriptors) {
+  return {
+    initialize: {
+      enumerable: false,
+      configurable: false,
+      writable: true,
+      value: this.createInitialize(Class, descriptors)
     },
-    /**
-     * Define a list of properties on the class.
-     */
-    defineProperties: {
-      configurable: true,
-      value: function (items) {
-        if (!items) {
-          return this;
-        }
-        var keys = Object.keys(items),
-            total = keys.length,
-            key, i;
-
-        for (i = 0; i < total; i++) {
-          key = keys[i];
-          this.defineProperty(key, items[key], true);
-        }
-        this.updateAutoGeneratedFunctions();
-        return this;
-      }
+    applyDefaults: {
+      enumerable: false,
+      configurable: false,
+      writable: true,
+      value: this.createApplyDefaults(Class, descriptors)
     },
-    /**
-     * Inherit descriptors from another class.
-     */
-    inherits: {
-      configurable: true,
-      value: function (Super) {
-        var keys = Object.keys(Super),
-            total = keys.length,
-            key, i;
+    configure: {
+      enumerable: false,
+      configurable: false,
+      writable: true,
+      value: this.createConfigure(Class, descriptors)
+    },
+    toJSON: {
+      enumerable: false,
+      configurable: false,
+      writable: true,
+      value: this.createToJSON(Class, descriptors)
+    }
+  };
+};
+
+/**
+ * Create a dynamic function, accepts the same arguments as
+ * the `Function` constructor, but marks it as an auto-generated function.
+ *
+ * @return {Function} The autogenerated function.
+ */
+prototype.createDynamicFunction = function () {
+  var fn = Function.apply(undefined, arguments);
+  fn.isAutoGenerated = true;
+  return fn;
+};
 
 
-        for (i = 0; i < total; i++) {
-          key = keys[i];
-          if (!this.hasOwnProperty(key)) {
-            this[key] = Super[key];
-          }
-        }
-        var superDescriptors = Super.descriptors || {};
-        keys = Object.keys(superDescriptors);
-        total = keys.length;
-        for (i = 0; i < total; i++) {
-          key = keys[i];
-          if (!descriptors.hasOwnProperty(key)) {
-            descriptors[key] = superDescriptors[key];
-          }
-        }
-        descriptors.__super__ = {
-          enumerable: false,
-          value: Super.prototype
-        };
-        this.__super__ = Super;
-        this.prototype = Object.create(Super.prototype, descriptors);
-        this.prototype.constructor = this;
-        // don't overwrite custom toString functions if supplied.
-        if (!descriptors.hasOwnProperty('toString')) {
-          Object.defineProperty(Class.prototype, 'toString', {
-            configurable: true,
-            writable: true,
-            value: Class.makeToString(descriptors)
-          });
-        }
-        this.updateAutoGeneratedFunctions();
+/**
+ * Create an `initialize()` function for a class.
+ *
+ * @param  {Function} Class       The class.
+ * @param  {Object}   descriptors The property descriptors.
+ *
+ * @return {Function} The initialize function.
+ */
+prototype.createInitialize = function (Class, descriptors) {
+  return this.createDynamicFunction('"use strict";');
+};
 
-        return this;
+/**
+ * Create an `applyDefaults` function for a class.
+ *
+ * @param  {Function} Class       The class.
+ * @param  {Object}   descriptors The property descriptors.
+ *
+ * @return {Function} The applyDefaults function.
+ */
+prototype.createApplyDefaults = function (Class, descriptors) {
+  var body = '';
+  each(descriptors, function (descriptor, name) {
+    var accessor = createAccessor(name),
+        value;
+    if (typeof descriptor.default === 'function') {
+      body += 'this' + accessor + ' = descriptors' + accessor + '.default(this, ' + JSON.stringify(name) + ');\n';
+    }
+    else if (typeof descriptor.default !== 'undefined') {
+      body += 'this' + accessor + ' = descriptors' + accessor + '.default;\n';
+    }
+    else if (typeof descriptor.bind !== 'undefined') {
+      if (descriptor.bind === true) {
+        value = 'this';
       }
-    },
-    /**
-     * Create a new class which extends from this one.
-     */
-    extend: {
-      configurable: true,
-      value: function (name, config) {
-        var Child = Classing.create(name, config);
-        Child.inherits(this);
-        return Child;
+      else {
+        value = 'descriptors' + accessor + '.bind';
       }
-    },
-    /**
-     * Mix the properties from a source object into this one.
-     * @type {Object}
-     */
-    mixin: {
-      configurable: true,
-      value: function (source) {
-        var keys = Object.keys(source),
-            total = keys.length,
-            combined = {},
-            key, i;
-
-        for (i = 0; i < total; i++) {
-          key = keys[i];
-          combined[key] = {
-            value: source[key]
-          };
-        }
-        this.defineProperties(combined);
-        return this;
-      }
-    },
-    /**
-     * Update any autogenerated functions.
-     */
-    updateAutoGeneratedFunctions: {
-      configurable: true,
-      value: function () {
-        if (!this.prototype.applyDefaults || this.prototype.applyDefaults.isAutoGenerated) {
-          this.prototype.applyDefaults = this.makeApplyDefaults(descriptors);
-        }
-        if (!this.prototype.configure || this.prototype.configure.isAutoGenerated) {
-          this.prototype.configure = this.makeConfigure(descriptors);
-        }
-        if (!this.prototype.toJSON || this.prototype.toJSON.isAutoGenerated) {
-          this.prototype.toJSON = this.makeToJSON(descriptors);
-        }
-      }
-    },
-    /**
-     * Make an efficient `applyDefaults()` function to set
-     * the default property values for a class instance.
-     *
-     * @param  {Object} descriptors The descriptors for the object.
-     * @return {Function}           The `applyDefaults()` function.
-     */
-    makeApplyDefaults: {
-      configurable: true,
-      value: function (descriptors) {
-        var keys = Object.keys(descriptors),
-            total = keys.length,
-            body = '',
-            key, descriptor, i, suffix, value;
-
-        for (i = 0; i < total; i++) {
-          key = keys[i];
-          descriptor = descriptors[key];
-          if (descriptor.hasOwnProperty('default')) {
-            suffix = '';
-            if (typeof descriptor.default === 'function') {
-              suffix = '(this)';
-            }
-            if (/^([\w|_|$]+)$/.test(key)) {
-              body += 'this.' + key + ' = this.constructor.descriptors.' + key + '.default' + suffix + ';';
-            }
-            else {
-              body += 'this["' + key + '"] = this.constructor.descriptors["' + key + '"].default' + suffix + ';';
-            }
-          }
-          else if (descriptor.bind) {
-            if (/^([\w|_|$]+)$/.test(key)) {
-              if (descriptor.bind === true) {
-                value = 'this';
-              }
-              else {
-                value = 'this.constructor.descriptors.' + key + '.bind';
-              }
-              body += 'this.' + key + ' = this.' + key + '.bind(' + value + ');';
-            }
-            else {
-              if (descriptor.bind === true) {
-                value = 'this';
-              }
-              else {
-                value = 'this.constructor.descriptors["' + key + '"].bind';
-              }
-              body += 'this["' + key + '"] = this["' + key + '"].bind(' + value + ');';
-            }
-          }
-        }
-        var applyDefaults = new Function(body); // jshint ignore:line
-        applyDefaults.isAutoGenerated = true;
-        return applyDefaults;
-      }
-    },
-    /**
-     * Make an efficient `configure()` function to set property values
-     * for an object based on the given descriptors.
-     *
-     * @param  {Object} descriptors The descriptors for the object.
-     * @return {Function}           The `configure()` function.
-     */
-    makeConfigure: {
-      configurable: true,
-      value: function (descriptors) {
-        var keys = Object.keys(descriptors),
-            total = keys.length,
-            body = '',
-            key, descriptor, i;
-
-        for (i = 0; i < total; i++) {
-          key = keys[i];
-          descriptor = descriptors[key];
-          if (descriptor.writable || descriptor.hasOwnProperty('set')) {
-            if (/^([\w|_|$]+)$/.test(key)) {
-              body += 'this.' + key + ' = config.' + key + ' !== undefined ? config.' + key + ' : this.' + key + ';'; // jshint ignore:line
-            }
-            else {
-              body += 'this["' + key + '"] = config["' + key + '"] !== undefined ? config["' + key + '"] : this["' + key + '"];'; // jshint ignore:line
-            }
-          }
-        }
-        var configure = new Function('config', body); // jshint ignore:line
-        configure.isAutoGenerated = true;
-        return configure;
-      }
-    },
-    /**
-     * Make an efficient `toJSON()` function for an object
-     * based on the given descriptors.
-     *
-     * @param  {Object} descriptors The descriptors for the object.
-     * @return {Function}           The `toJSON()` function.
-     */
-    makeToJSON: {
-      configurable: true,
-
-      value: function (descriptors) {
-        var keys = Object.keys(descriptors).sort(),
-            total = keys.length,
-            parts = [],
-            key, descriptor, i;
-
-        for (i = 0; i < total; i++) {
-          key = keys[i];
-          descriptor = descriptors[key];
-          if (descriptor.enumerable || descriptor.enumerable == null) {
-            if (/^([\w|_|$]+)$/.test(key)) {
-              parts.push(key + ': this.' + key);
-            }
-            else {
-              parts.push('"' + key + '": this["' + key + '"]');
-            }
-          }
-        }
-        var toJSON = new Function('return {' + parts.join(',') + '};'); // jshint ignore:line
-        toJSON.isAutoGenerated = true;
-        return toJSON;
-      }
-    },
-    /**
-     * Make an efficient `toString()` function for the class.
-     *
-     * @return {Function} The `toString()` function.
-     */
-    makeToString: {
-      configurable: true,
-      value: function () {
-        var fn = new Function('return "[object ' + this.name + ']";'); // jshint ignore:line
-        fn.isAutoGenerated = true;
-        return fn;
-      }
+      body += 'this' + accessor + ' = this' + accessor + '.bind(' + value + ');\n';
     }
   });
+
+  if (body.length) {
+    body = 'var descriptors = this.constructor["[[descriptors]]"];\n' + body;
+  }
+  return this.createDynamicFunction('"use strict";\n' + body);
+};
+
+
+/**
+ * Create a `configure` function for a class.
+ *
+ * @param  {Function} Class       The class.
+ * @param  {Object}   descriptors The property descriptors.
+ *
+ * @return {Function} The configure function.
+ */
+prototype.createConfigure = function (Class, descriptors) {
+  var body = '"use strict";\n';
+  each(descriptors, function (descriptor, name) {
+    if (descriptor.writable || typeof descriptor.set === 'function') {
+      var accessor = createAccessor(name);
+      body += 'if (config' + accessor + ' !== undefined) {\n\
+                  this' + accessor + ' = config' + accessor + ';\n\
+               }\n';
+    }
+  });
+  return this.createDynamicFunction('config', body);
 };
 
 /**
- * Make a prototype for a class, based on the given descriptors.
+ * Create a `toJSON` function for a class.
  *
- * @param  {Function} Class       The class itself.
- * @param  {Object} descriptors   The descriptors for the class.
+ * @param  {Function} Class       The class.
+ * @param  {Object}   descriptors The property descriptors.
+ *
+ * @return {Function} The toJSON function.
  */
-Classing.makePrototype = function (Class, descriptors) {
-  if (!descriptors.initialize) {
-    descriptors.initialize = function () {};
-  }
-  Class.defineProperties(descriptors);
-  Class.updateAutoGeneratedFunctions();
+prototype.createToJSON = function (Class, descriptors) {
+  var body = [];
+  each(descriptors, function (descriptor, name) {
+    if (descriptor.enumerable) {
+      var accessor = createAccessor(name);
+      body.push('  ' + JSON.stringify(name) + ': this' + accessor);
+    }
+  });
 
-  // don't overwrite custom toString functions if supplied.
-  if (!descriptors.hasOwnProperty('toString')) {
-    Object.defineProperty(Class.prototype, 'toString', {
+  return this.createDynamicFunction('"use strict";\nreturn {\n  ' + body.join(',\n  ') + '};\n');
+};
+
+/**
+ * Create the static methods / properties for a class.
+ *
+ * @param  {Function} Class             The class.
+ * @param  {Object}   descriptors       The property descriptors.
+ * @param  {Object}   staticDescriptors The static property descriptors.
+ *
+ * @return {Object} The static descriptors.
+ */
+prototype.createStatic = function (Class, descriptors, staticDescriptors) {
+  var context = this.createDefaultStatic(Class, descriptors, staticDescriptors),
+      self = this;
+  each(staticDescriptors, function (descriptor, name) {
+    context[name] = descriptor;
+  });
+
+  return context;
+};
+
+/**
+ * Create the default static methods / properties for a class.
+ *
+ * @param  {Function} Class             The class.
+ * @param  {Object}   descriptors       The property descriptors.
+ * @param  {Object}   staticDescriptors The static property descriptors.
+ *
+ * @return {Object} The default static descriptors.
+ */
+prototype.createDefaultStatic = function (Class, descriptors, staticDescriptors) {
+  return {
+    '[[descriptors]]': {
+      enumerable: false,
+      configurable: false,
+      writable: true,
+      value: descriptors
+    },
+    create: {
+      enumerable: true,
       configurable: true,
       writable: true,
-      value: Class.makeToString(descriptors)
-    });
-  }
+      value: this.createStaticCreate(Class, descriptors, staticDescriptors)
+    },
+    inherits: {
+      enumerable: true,
+      configurable: true,
+      writable: true,
+      value: this.createStaticInherits(Class, descriptors, staticDescriptors)
+    },
+    extend: {
+      enumerable: true,
+      configurable: true,
+      writable: true,
+      value: this.createStaticExtend(Class, descriptors, staticDescriptors)
+    },
+    mixin: {
+      enumerable: true,
+      configurable: true,
+      writable: true,
+      value: this.createStaticMixin(Class, descriptors, staticDescriptors)
+    },
+    defineProperty: {
+      enumerable: true,
+      configurable: true,
+      writable: true,
+      value: this.createStaticDefineProperty(Class, descriptors, staticDescriptors)
+    },
+    defineProperties: {
+      enumerable: true,
+      configurable: true,
+      writable: true,
+      value: this.createStaticDefineProperties(Class, descriptors, staticDescriptors)
+    },
+    getOwnPropertyDescriptor: {
+      enumerable: true,
+      configurable: true,
+      writable: true,
+      value: this.createStaticGetOwnPropertyDescriptor(Class, descriptors, staticDescriptors)
+    }
+  };
 };
 
 /**
- * Extend the class factory.
+ * Create a function which can create new instances of the class.
  *
- * @param  {Object} descriptors The descriptors for the new class factory.
- * @return {Classing}            The class factory
+ * @param  {Function} Class             The class.
+ * @param  {Object}   descriptors       The property descriptors.
+ * @param  {Object}   staticDescriptors The static property descriptors.
+ *
+ * @return {Function} The generated function.
  */
-Classing.extend = function (descriptors) {
-  descriptors = descriptors || {};
-
-  function Child (name, descriptors) {
-    return Child.create(name, descriptors);
-  }
-
-
-  var keys = Object.keys(this),
-      total = keys.length,
-      i, key;
-
-
-  for (i = 0; i < total; i++) {
-    key = keys[i];
-    Child[key] = this[key];
-  }
-
-  keys = Object.keys(descriptors);
-  total = keys.length;
-
-
-  for (i = 0; i < total; i++) {
-    key = keys[i];
-    if (typeof descriptors[key] === "function") {
-      descriptors[key] = {
-        configurable: true,
-        value: descriptors[key]
-      };
-    }
-  }
-
-  Object.defineProperties(Child, descriptors);
-  Child.super = this;
-  return Child;
+prototype.createStaticCreate = function (Class, descriptors, staticDescriptors) {
+  return function create (config) {
+    return new this(config);
+  };
 };
-},{}],4:[function(_dereq_,module,exports){
-var OBLIGATIONS = _dereq_('obligations');
+
+/**
+ * Create a function which can add another class to the given class's inheritance chain.
+ *
+ * @param  {Function} Class             The class.
+ * @param  {Object}   descriptors       The property descriptors.
+ * @param  {Object}   staticDescriptors The static property descriptors.
+ *
+ * @return {Function} The generated function.
+ */
+prototype.createStaticInherits = function (Class, descriptors, staticDescriptors) {
+  var factory = this;
+  return function inherits (Super) {
+    var self = this;
+    each(Super, function (value, key) {
+      if (!self.hasOwnProperty(key)) {
+        self[key] = value;
+      }
+    });
+    if (Super['[[descriptors]]'] && typeof Super['[[descriptors]]'] === 'object') {
+      each(Super['[[descriptors]]'], function (descriptor, name) {
+        if (self['[[descriptors]]'][name] === undefined) {
+          self['[[descriptors]]'][name] = descriptor;
+        }
+      });
+    }
+    self.__super__ = Super;
+    self.prototype = Object.create(Super.prototype, self['[[descriptors]]']);
+    self.prototype.constructor = self;
+    self.prototype.__super__ = Super.prototype;
+    factory.updateDynamicFunctions(self, self['[[descriptors]]']);
+    return self;
+  };
+};
+
+/**
+ * Create a function which can create a new class extending from this one.
+ *
+ * @param  {Function} Class             The class.
+ * @param  {Object}   descriptors       The property descriptors.
+ * @param  {Object}   staticDescriptors The static property descriptors.
+ *
+ * @return {Function} The generated function.
+ */
+prototype.createStaticExtend = function (Class, descriptors) {
+  var factory = this;
+  return function extend (name, descriptors, staticDescriptors) {
+    if (name && typeof name === 'object') {
+      staticDescriptors = descriptors || {};
+      descriptors = name;
+      name = this.name || 'Class';
+    }
+    else if (!name) {
+      name = 'Class';
+      descriptors = descriptors || {};
+      staticDescriptors = staticDescriptors || {};
+    }
+    var Class = factory.create(name, descriptors, staticDescriptors);
+    Class.inherits(this);
+    return Class;
+  };
+};
+
+/**
+ * Create a function which can mix properties from an object into the prototype of the class.
+ *
+ * @param  {Function} Class             The class.
+ * @param  {Object}   descriptors       The property descriptors.
+ * @param  {Object}   staticDescriptors The static property descriptors.
+ *
+ * @return {Function} The generated function.
+ */
+prototype.createStaticMixin = function (Class, descriptors, staticDescriptors) {
+  return function mixin (source) {
+    var self = this,
+        combined = {};
+    each(source, function (value, key) {
+      combined[key] = {
+        value: value
+      };
+    });
+    this.defineProperties(combined);
+    return this;
+  };
+};
+
+
+/**
+ * Create a `defineProperties()` function for the class.
+ *
+ * @param  {Function} Class             The class.
+ * @param  {Object}   descriptors       The property descriptors.
+ * @param  {Object}   staticDescriptors The static property descriptors.
+ *
+ * @return {Function} The generated function.
+ */
+prototype.createStaticDefineProperties = function (Class, descriptors, staticDescriptors) {
+  return function defineProperties (obj) {
+    if (!obj) {
+      return this;
+    }
+    var self = this;
+    each(obj, function (descriptor, name) {
+      self.defineProperty(name, descriptor);
+    });
+    return this;
+  };
+};
+
+
+/**
+ * Create a `defineProperty()` function for the class.
+ *
+ * @param  {Function} Class             The class.
+ * @param  {Object}   descriptors       The property descriptors.
+ * @param  {Object}   staticDescriptors The static property descriptors.
+ *
+ * @return {Function} The generated function.
+ */
+prototype.createStaticDefineProperty = function (Class, descriptors, staticDescriptors) {
+  var factory = this;
+  return function defineProperty (name, descriptor) {
+    this['[[descriptors]]'][name] = factory.normalizeDescriptor(name, descriptor);
+    Object.defineProperty(this.prototype, name, this['[[descriptors]]'][name]);
+    factory.updateDynamicFunctions(Class, Class['[[descriptors]]']);
+    return this;
+  };
+};
+
+/**
+ * Create a `getOwnPropertyDescriptor()` function for the class.
+ *
+ * @param  {Function} Class             The class.
+ * @param  {Object}   descriptors       The property descriptors.
+ * @param  {Object}   staticDescriptors The static property descriptors.
+ *
+ * @return {Function} The generated function.
+ */
+prototype.createStaticGetOwnPropertyDescriptor = function (Class, descriptors, staticDescriptors) {
+  var factory = this;
+  return function getOwnPropertyDescriptor (name) {
+    return this['[[descriptors]]'][name];
+  };
+};
+
+/**
+ * Update the dynamic auto-generated functions for a class.
+ *
+ * @param  {Function} Class             The class.
+ * @param  {Object}   descriptors       The property descriptors.
+ * @param  {Object}   staticDescriptors The static property descriptors.
+ */
+prototype.updateDynamicFunctions = function (Class, descriptors) {
+  if (!Class.prototype.initialize || Class.prototype.initialize.isAutoGenerated) {
+    Class.prototype.initialize = this.createInitialize(Class, descriptors);
+  }
+
+  if (!Class.prototype.applyDefaults || Class.prototype.applyDefaults.isAutoGenerated) {
+    Class.prototype.applyDefaults = this.createApplyDefaults(Class, descriptors);
+  }
+
+  if (!Class.prototype.configure || Class.prototype.configure.isAutoGenerated) {
+    Class.prototype.configure = this.createConfigure(Class, descriptors);
+  }
+
+  if (!Class.prototype.toJSON || Class.prototype.toJSON.isAutoGenerated) {
+    Class.prototype.toJSON = this.createToJSON(Class, descriptors);
+  }
+};
+
+function each (obj, visitor) {
+  var keys = Object.keys(obj),
+      length = keys.length,
+      key, i;
+  for (i = 0; i < length; i++) {
+    key = keys[i];
+    visitor(obj[key], key, obj);
+  }
+}
+
+var safeIdentifier = /^[a-zA-Z_$][0-9a-zA-Z_$]*$/;
+
+function createAccessor (name) {
+  if (safeIdentifier.test(name)) {
+    return '.' + name;
+  }
+  else {
+    return '[' + JSON.stringify(name) + ']';
+  }
+}
+
+ClassFactory.each = each;
+ClassFactory.createAccessor = createAccessor;
+},{}],5:[function(_dereq_,module,exports){
 'use strict';
+
+
+var Factory = _dereq_('./factory'),
+    factory = new Factory();
+
+module.exports = exports = function (name, descriptors, staticDescriptors) {
+  return factory.create(name, descriptors, staticDescriptors);
+};
+
+exports.create = function (name, descriptors, staticDescriptors) {
+  return factory.create(name, descriptors, staticDescriptors);
+};
+
+exports.extend = function (methods) {
+  return Factory.extend(methods);
+};
+
+exports.Factory = Factory;
+
+},{"./factory":4}],6:[function(_dereq_,module,exports){
+'use strict';
+var OBLIGATIONS = _dereq_('obligations');
 /**
  * The validator base class.
  * @type {Function}
@@ -1087,7 +1277,7 @@ exports.forDescriptors = function (descriptors) {
             lines.push('if (!(result = validators' + accessor + '(obj' + accessor + ')).valid) {', '  isValid = false;', '  errors' + accessor + ' = result.error;', '}');
         }
     }
-    var body = 'var isValid = true,\n' + '    errors = {},\n' + '    result;\n\n' + lines.join('\n') + '\n' + 'return {valid: isValid, errors: errors};';
+    var body = 'var isValid = true,\n' + '    errors = {},\n' + '    result;\n\n' + lines.join('\n') + '\n' + 'return {valid: isValid, value: obj, errors: errors};';
     var fn = new Function('validators', 'obj', body);
     // jshint ignore: line
     __result = fn.bind(undefined, validators);
@@ -1129,9 +1319,9 @@ for (i = 0; i < total; i++) {
     name = names[i];
     exports.define(name, validators[name]);
 }
-},{"./validator":5,"./validators":6,"obligations":7}],5:[function(_dereq_,module,exports){
-var OBLIGATIONS = _dereq_('obligations');
+},{"./validator":7,"./validators":8,"obligations":9}],7:[function(_dereq_,module,exports){
 'use strict';
+var OBLIGATIONS = _dereq_('obligations');
 var Class = _dereq_('classing');
 /**
  * Base class for Validators.
@@ -1210,9 +1400,9 @@ module.exports = Class.create({
         return true;
     }
 });
-},{"classing":3,"obligations":7}],6:[function(_dereq_,module,exports){
-var OBLIGATIONS = _dereq_('obligations');
+},{"classing":5,"obligations":9}],8:[function(_dereq_,module,exports){
 'use strict';
+var OBLIGATIONS = _dereq_('obligations');
 /**
  * # Required Validator
  *
@@ -1779,7 +1969,7 @@ exports.datetime = {
         return this.prepare(this.message);
     }
 };
-},{"obligations":7}],7:[function(_dereq_,module,exports){
+},{"obligations":9}],9:[function(_dereq_,module,exports){
 /**
  * # Precondition Error
  * Thrown when a precondition fails.
@@ -1883,6 +2073,6 @@ exports.InvariantError = InvariantError;
 exports.precondition = precondition;
 exports.postcondition = postcondition;
 exports.invariant = invariant;
-},{}]},{},[1])
-(1)
+},{}]},{},[2])
+(2)
 });

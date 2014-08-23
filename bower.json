@@ -1,7 +1,7 @@
 {
   "name": "modeling",
   "main": "lib/index.js",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "homepage": "https://github.com/codemix/modeling",
   "authors": [
     "Charles Pick <charles@codemix.com>"
@@ -25,8 +25,8 @@
     "tests"
   ],
   "dependencies": {
-    "classing": "~0.0.9",
-    "validating": "~0.0.5",
+    "classing": "~0.1.0",
+    "validating": "~0.0.6",
     "casting": "~0.0.1"
   }
 }
