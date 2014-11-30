@@ -64,16 +64,6 @@ describe('Examples', function () {
     person.age.should.equal(new Date().getFullYear() - 2000);
   });
 
-  it('should not accept invalid property values', function () {
-    var person = new Person();
-    person.name = 'Bob';
-    person.configure({url: 'not a url'});
-    expect(function () {
-      person.dateOfBirth = 'not a date';
-    }).to.throwError(TypeError);
-    Person.validate(person).valid.should.be.false;
-  });
-
   it('should reject invalid user input', function () {
     var result = Person.input({
       name: null,

@@ -21,132 +21,11 @@ module.exports = ClassFactory.extend({
                   if (!(this instanceof ' + name + ')) {\n\
                     return new ' + name + '(config);\n\
                   }\n\
-                  this["[[state]]"] = {};\n\
                   this.applyDefaults();\n\
                   if (config) { this.configure(config); }\n\
                   this.initialize();\n\
                 };';
     return (new Function(body))(); // jshint ignore: line
-  },
-  /**
-   * Create a prototype for the given Class + descriptors.
-   *
-   * @param  {Function} Class       The class.
-   * @param  {Object}   descriptors The property descriptors.
-   *
-   * @return {Object} The descriptors for the default prototype.
-   */
-  createDefaultPrototype: function (Class, descriptors) {
-    var proto = ClassFactory.prototype.createDefaultPrototype.call(this, Class, descriptors);
-    proto['[[state]]'] = {
-      enumerable: false,
-      configurable: false,
-      writable: true
-    };
-    proto.forEach = {
-      enumerable: false,
-      configurable: false,
-      writable: true,
-      value: this.createForEach(Class, descriptors)
-    };
-    proto.keys = {
-      enumerable: false,
-      configurable: false,
-      writable: true,
-      value: this.createKeys(Class, descriptors)
-    };
-    return proto;
-  },
-  /**
-   * Create a `forEach` function for a class.
-   *
-   * @param  {Function} Class       The class.
-   * @param  {Object}   descriptors The property descriptors.
-   *
-   * @return {Function} The forEach function.
-   */
-  createForEach: function (Class, descriptors) {
-    var body = '"use strict";\nthisContext = thisContext || this;\n';
-    each(descriptors, function (descriptor, name) {
-      var accessor = createAccessor(name);
-      body += 'if (this'+accessor+' !== undefined) {\n\
-                 fn.call(thisContext, this'+accessor+', '+JSON.stringify(name)+', this);\n\
-               }';
-    });
-    return this.createDynamicFunction('fn', 'thisContext', body);
-  },
-  /**
-   * Create a `keys` function for a class.
-   *
-   * @param  {Function} Class       The class.
-   * @param  {Object}   descriptors The property descriptors.
-   *
-   * @return {Function} The keys function.
-   */
-  createKeys: function (Class, descriptors) {
-    var keys = [];
-    each(descriptors, function (descriptor, name) {
-      if (descriptor.enumerable) {
-        keys.push(name);
-      }
-    });
-    keys.sort();
-    var body = '"use strict";\nreturn ' + JSON.stringify(keys) + ';';
-    return this.createDynamicFunction(body);
-  },
-
-  /**
-   * Normalize a descriptor.
-   *
-   * @param  {String} name        The name of the descriptor.
-   * @param  {mixed}  descriptor  The raw descriptor or value.
-   *
-   * @return {Object} The normalized descriptor.
-   */
-  normalizeDescriptor: function (name, descriptor) {
-    var normalized = ClassFactory.prototype.normalizeDescriptor.call(this, name, descriptor);
-    if (typeof normalized.value !== 'function' &&
-        typeof normalized.get !== 'function' &&
-        typeof normalized.set !== 'function' &&
-        normalized.writable !== false
-    ) {
-      return this.wrapDescriptor(name, normalized);
-    }
-    else {
-      return normalized;
-    }
-  },
-  /**
-   * Wrap a descriptor in getters / setters.
-   *
-   * @param  {String} name        The name of the descriptor.
-   * @param  {Object} descriptor  The normalized descriptor.
-   *
-   * @return {Object} The wrapped descriptor.
-   */
-  wrapDescriptor: function (name, descriptor) {
-    var value = descriptor.value,
-        wrapped = {};
-    each(descriptor, function (value, key) {
-      if (key !== 'value' && key !== 'writable') {
-        wrapped[key] = value;
-      }
-    });
-    wrapped.get = function () {
-      return this['[[state]]'][name];
-    };
-    if (wrapped.cast || wrapped.type) {
-      var caster = wrapped.cast || Casting.get(wrapped.type);
-      wrapped.set = function (value) {
-        this['[[state]]'][name] = value === null ? null : caster.call(this, value);
-      };
-    }
-    else {
-      wrapped.set = function (value) {
-        this['[[state]]'][name] = value;
-      };
-    }
-    return wrapped;
   },
   /**
    * Create the default static methods / properties for a class.
@@ -198,7 +77,7 @@ module.exports = ClassFactory.extend({
     var castAll = Casting.forDescriptors(descriptors);
     function cast (value) {
       if (!(value instanceof this)) {
-       return new this(value);
+       return new this(castAll(value));
       }
       else {
         return castAll(value);
@@ -209,7 +88,7 @@ module.exports = ClassFactory.extend({
     return cast;
   },
   /**
-   * Create a function which validate instances of the class.
+   * Create a function which can validate instances of the class.
    *
    * @param  {Function} Class             The class.
    * @param  {Object}   descriptors       The property descriptors.
@@ -301,8 +180,42 @@ module.exports = ClassFactory.extend({
     return fn;
   },
   /**
+   * Create a `configure` function for a class.
+   *
+   * @param  {Function} Class       The class.
+   * @param  {Object}   descriptors The property descriptors.
+   *
+   * @return {Function} The configure function.
+   */
+  createConfigure: function (Class, descriptors) {
+    var body = '"use strict";\n';
+    var casters = {};
+    each(descriptors, function (descriptor, name) {
+      if (descriptor.writable || typeof descriptor.set === 'function') {
+        var accessor = createAccessor(name);
+        if (descriptor.cast || descriptor.type) {
+          casters[name] = Casting.forDescriptor(descriptor);
+          body += 'if (config' + accessor + ' !== undefined) {\n\
+                      this' + accessor + ' = casters' + accessor + '(config' + accessor + ');\n\
+                   }\n';
+        }
+        else {
+          body += 'if (config' + accessor + ' !== undefined) {\n\
+                      this' + accessor + ' = config' + accessor + ';\n\
+                   }\n';
+        }
+      }
+    });
+    var configure = this.createDynamicFunction('casters', 'config', body);
+    var fn = function (config) {
+      return configure.call(this, casters, config);
+    };
+    fn.isAutoGenerated = true;
+    return fn;
+  },
+  /**
    * Create a function which can return a representation
-   * of the **class**, whichcan be encoded as JSON.
+   * of the **class**, which can be encoded as JSON.
    *
    * @param  {Function} Class             The class.
    * @param  {Object}   descriptors       The property descriptors.
@@ -357,12 +270,6 @@ module.exports = ClassFactory.extend({
    */
   updateDynamicFunctions: function (Class, descriptors) {
     ClassFactory.prototype.updateDynamicFunctions.call(this, Class, descriptors);
-    if (!Class.prototype.forEach || Class.prototype.forEach.isAutoGenerated) {
-      Class.prototype.forEach = this.createForEach(Class, descriptors);
-    }
-    if (!Class.prototype.keys || Class.prototype.keys.isAutoGenerated) {
-      Class.prototype.keys = this.createKeys(Class, descriptors);
-    }
     if (!Class.cast || Class.cast.isAutoGenerated) {
       Class.cast = this.createStaticCast(Class, descriptors);
     }
@@ -427,6 +334,7 @@ exports.extend = function (methods) {
 exports.Factory = Factory;
 
 },{"./factory":1}],3:[function(_dereq_,module,exports){
+(function (global){
 "use strict";
 
 /**
@@ -459,7 +367,7 @@ exports.define = function (name, Constructor, caster) {
  * Get a function which can cast values to the given type.
  *
  * @param  {String|Function} type The type or name of the type to cast to.
- * @return {mixed}                The casting function, or undefined if none exists.
+ * @return {Function}             The casting function.
  */
 exports.get = function (type) {
   var casters = exports.casters,
@@ -473,6 +381,17 @@ exports.get = function (type) {
     }
   }
 
+  return function (value) {
+    if (typeof type === 'string') {
+      type = global[type];
+    }
+    if (!(value instanceof type)) {
+      return new type(value); /* jshint ignore: line */
+    }
+    else {
+      return value;
+    }
+  };
 };
 
 /**
@@ -526,6 +445,23 @@ exports.forDescriptors = function (descriptors) {
   return (new Function('casters', 'object', lines.join('\n'))).bind(undefined, casters); // jshint ignore: line
 };
 
+/**
+ * Create a function which can cast a property according to the given descriptor.
+ *
+ * @param  {Object} descriptor  The descriptor containing the type.
+ * @return {Function}           The cast function.
+ */
+exports.forDescriptor = function (descriptor) {
+  if (descriptor.type) {
+    return exports.get(descriptor.type);
+  }
+  else {
+    return function (a) {
+      return a;
+    };
+  }
+};
+
 // # Builtin Types
 
 
@@ -575,6 +511,7 @@ exports.define('date', Date, function (value) {
   }
   return value;
 });
+}).call(this,typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
 },{}],4:[function(_dereq_,module,exports){
 'use strict';
 
@@ -1229,6 +1166,8 @@ exports.define = function (name, descriptors) {
  * @return {Validator}            The created validator instance.
  */
 exports.create = function (name, properties) {
+    OBLIGATIONS.precondition(name, 'Validator name must be specified');
+    OBLIGATIONS.precondition(exports.validators[name], 'Validator `' + name + '` must exist');
     return exports.validators[name].create(properties);
 };
 /**
@@ -1319,7 +1258,7 @@ for (i = 0; i < total; i++) {
     name = names[i];
     exports.define(name, validators[name]);
 }
-},{"./validator":7,"./validators":8,"obligations":9}],7:[function(_dereq_,module,exports){
+},{"./validator":7,"./validators":8,"obligations":11}],7:[function(_dereq_,module,exports){
 'use strict';
 var OBLIGATIONS = _dereq_('obligations');
 var Class = _dereq_('classing');
@@ -1400,7 +1339,7 @@ module.exports = Class.create({
         return true;
     }
 });
-},{"classing":5,"obligations":9}],8:[function(_dereq_,module,exports){
+},{"classing":10,"obligations":11}],8:[function(_dereq_,module,exports){
 'use strict';
 var OBLIGATIONS = _dereq_('obligations');
 /**
@@ -1969,7 +1908,11 @@ exports.datetime = {
         return this.prepare(this.message);
     }
 };
-},{"obligations":9}],9:[function(_dereq_,module,exports){
+},{"obligations":11}],9:[function(_dereq_,module,exports){
+module.exports=_dereq_(4)
+},{}],10:[function(_dereq_,module,exports){
+module.exports=_dereq_(5)
+},{"./factory":9}],11:[function(_dereq_,module,exports){
 /**
  * # Precondition Error
  * Thrown when a precondition fails.

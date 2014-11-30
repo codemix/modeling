@@ -110,15 +110,9 @@ describe('Modeling', function () {
     });
 
     it('should have only the defined keys', function () {
-      this.user.keys().should.eql(['@id', 'email', 'name', 'noType']);
-    });
-
-    it('should iterate all the keys', function () {
-      var obj = {};
-      this.user.forEach(function (value, key) {
-        obj[key] = value;
-      });
-      obj.should.eql(this.user.toJSON());
+      var keys = Object.keys(this.user);
+      keys.sort();
+      keys.should.eql(['@id', 'email', 'name', 'noType']);
     });
 
     it('should validate invalid objects', function () {
